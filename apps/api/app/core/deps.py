@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.enums import Role
+from app.models.clinic_staff import ClinicStaffMember
 from app.models.user import User
 
 
@@ -41,4 +42,21 @@ def require_role(*roles: Role):
         return user
 
     return _inner
+
+
+def get_clinic_owner_id(user: User, db: Session) -> "uuid.UUID":
+    """
+    Clinic staff accounts are linked to a clinic admin via ClinicStaffMember.
+    This returns the clinic owner (admin) user_id for permission checks and data access.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select as _select
+
+    if user.role != Role.clinic_staff:
+        return user.id
+    row = db.scalar(_select(ClinicStaffMember).where(ClinicStaffMember.staff_user_id == user.id))
+    if not row:
+        # orphan staff account
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Clinic staff not linked to a clinic")
+    return _uuid.UUID(str(row.clinic_user_id))
 

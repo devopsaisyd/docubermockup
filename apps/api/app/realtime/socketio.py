@@ -6,8 +6,8 @@ import socketio
 
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
-from app.models.doctor import DoctorProfile
 from app.models.enums import Role
+from app.models.doctor import DoctorProfile
 from app.models.shift import Shift, ShiftAssignment
 from app.services.shift_state import tracking_window_active
 
@@ -17,6 +17,9 @@ sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
 def room_for_assignment(assignment_id: uuid.UUID) -> str:
     return f"assignment:{assignment_id}"
+
+def room_for_shift(shift_id: uuid.UUID) -> str:
+    return f"shift:{shift_id}"
 
 def room_for_shift(shift_id: uuid.UUID) -> str:
     return f"shift:{shift_id}"
@@ -118,7 +121,9 @@ async def join_shift(sid, data):
             if shift.assignment and shift.assignment.doctor_user_id == user_id:
                 pass
             else:
-                doc = db.scalar(db.query(DoctorProfile).filter(DoctorProfile.user_id == user_id).limit(1).statement)
+                from sqlalchemy import select
+
+                doc = db.scalar(select(DoctorProfile).where(DoctorProfile.user_id == user_id))
                 if not doc:
                     return
                 if doc.verification_status.value != "approved" or doc.specialty != shift.specialty:
@@ -144,6 +149,10 @@ async def leave_shift(sid, data):
 
 async def emit_assignment_update(assignment_id: uuid.UUID, payload: dict) -> None:
     await sio.emit("assignment_update", payload, room=room_for_assignment(assignment_id))
+
+
+async def emit_shift_update(shift_id: uuid.UUID, payload: dict) -> None:
+    await sio.emit("shift_update", payload, room=room_for_shift(shift_id))
 
 
 async def emit_shift_update(shift_id: uuid.UUID, payload: dict) -> None:
