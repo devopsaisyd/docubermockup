@@ -6,7 +6,8 @@ import socketio
 
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
-from app.models.enums import Role, ShiftStatus
+from app.models.doctor import DoctorProfile
+from app.models.enums import Role
 from app.models.shift import Shift, ShiftAssignment
 from app.services.shift_state import tracking_window_active
 
@@ -16,6 +17,9 @@ sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
 def room_for_assignment(assignment_id: uuid.UUID) -> str:
     return f"assignment:{assignment_id}"
+
+def room_for_shift(shift_id: uuid.UUID) -> str:
+    return f"shift:{shift_id}"
 
 
 @sio.event
@@ -89,7 +93,59 @@ async def leave_assignment(sid, data):
         return
     await sio.leave_room(sid, room_for_assignment(aid))
 
+@sio.event
+async def join_shift(sid, data):
+    # data: { shift_id }
+    session = await sio.get_session(sid)
+    shift_id = data.get("shift_id")
+    try:
+        shid = uuid.UUID(str(shift_id))
+        user_id = uuid.UUID(str(session.get("user_id")))
+        role = Role(str(session.get("role")))
+    except Exception:
+        return
+
+    with SessionLocal() as db:
+        shift = db.get(Shift, shid)
+        if not shift:
+            return
+
+        if role in (Role.clinic_admin, Role.clinic_staff):
+            if shift.clinic_user_id != user_id:
+                return
+        elif role == Role.doctor:
+            # allow if assigned OR verified+matching specialty (for negotiation pre-booking)
+            if shift.assignment and shift.assignment.doctor_user_id == user_id:
+                pass
+            else:
+                doc = db.scalar(db.query(DoctorProfile).filter(DoctorProfile.user_id == user_id).limit(1).statement)
+                if not doc:
+                    return
+                if doc.verification_status.value != "approved" or doc.specialty != shift.specialty:
+                    return
+        elif role == Role.admin:
+            pass
+        else:
+            return
+
+    await sio.enter_room(sid, room_for_shift(shid))
+    await sio.emit("joined", {"shift_id": str(shid)}, to=sid)
+
+
+@sio.event
+async def leave_shift(sid, data):
+    shift_id = data.get("shift_id")
+    try:
+        shid = uuid.UUID(str(shift_id))
+    except Exception:
+        return
+    await sio.leave_room(sid, room_for_shift(shid))
+
 
 async def emit_assignment_update(assignment_id: uuid.UUID, payload: dict) -> None:
     await sio.emit("assignment_update", payload, room=room_for_assignment(assignment_id))
+
+
+async def emit_shift_update(shift_id: uuid.UUID, payload: dict) -> None:
+    await sio.emit("shift_update", payload, room=room_for_shift(shift_id))
 
