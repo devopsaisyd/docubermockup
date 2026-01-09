@@ -43,6 +43,16 @@ type Shift = {
   assignment_id?: string | null;
 };
 
+type ChatMessage = {
+  id: string;
+  kind: "text" | "offer" | string;
+  sender_role: string;
+  message: string | null;
+  offer_amount_inr: number | null;
+  offer_status: "proposed" | "accepted" | "rejected" | null;
+  created_at: string;
+};
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await AsyncStorage.getItem("locummap_token");
   const headers: any = { "Content-Type": "application/json", ...(init?.headers ?? {}) };
@@ -149,6 +159,10 @@ export default function App() {
   const [jobs, setJobs] = useState<Shift[]>([]);
   const [active, setActive] = useState<{ shift: Shift; assignmentId: string } | null>(null);
   const [currentLoc, setCurrentLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [offerAmount, setOfferAmount] = useState("3500");
+  const shiftSocketRef = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -205,6 +219,26 @@ export default function App() {
           },
         });
         setCurrentLoc({ lat: 13.0379, lng: 80.2405 });
+        setChat([
+          {
+            id: "demo-chat-1",
+            kind: "text",
+            sender_role: "clinic_admin",
+            message: "Can you reach by 8:45?",
+            offer_amount_inr: null,
+            offer_status: null,
+            created_at: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "demo-chat-2",
+            kind: "offer",
+            sender_role: "doctor",
+            message: null,
+            offer_amount_inr: 4000,
+            offer_status: "proposed",
+            created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+          },
+        ]);
         return;
       }
       const tok = await AsyncStorage.getItem("locummap_token");
@@ -305,8 +339,113 @@ export default function App() {
       setActive({ shift: s, assignmentId: res.assignment_id });
       setScreen("live");
       await startBackgroundTracking(res.assignment_id);
+      await refreshChat(shiftId);
+      await connectShiftSocket(shiftId);
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshChat(shiftId: string) {
+    try {
+      const msgs = await api<ChatMessage[]>(`/shifts/${shiftId}/chat`);
+      setChat(msgs);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function connectShiftSocket(shiftId: string) {
+    try {
+      const token = await AsyncStorage.getItem("locummap_token");
+      if (!token) return;
+      if (!shiftSocketRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { io } = require("socket.io-client");
+        shiftSocketRef.current = io(API_BASE_URL, {
+          path: "/ws/socket.io",
+          transports: ["websocket"],
+          auth: { token },
+        });
+        shiftSocketRef.current.on("shift_update", async (msg: any) => {
+          if (msg?.type === "chat_message" && msg?.message) {
+            setChat((prev) => [
+              ...prev,
+              {
+                id: msg.message.id,
+                kind: msg.message.kind,
+                sender_role: msg.message.sender_role,
+                message: msg.message.message ?? null,
+                offer_amount_inr: msg.message.offer_amount_inr ?? null,
+                offer_status: msg.message.offer_status ?? null,
+                created_at: msg.message.created_at ?? new Date().toISOString(),
+              },
+            ]);
+          }
+          if (msg?.type === "offer_update") {
+            setChat((prev) =>
+              prev.map((m) => (m.id === msg.message_id ? { ...m, offer_status: msg.offer_status ?? m.offer_status } : m))
+            );
+            // refresh shift price after accept
+            try {
+              const s = await api<Shift>(`/shifts/${shiftId}`);
+              setActive((prev) => (prev ? { ...prev, shift: s } : prev));
+            } catch {
+              // ignore
+            }
+          }
+        });
+      }
+      shiftSocketRef.current.emit("join_shift", { shift_id: shiftId });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function sendChat(kind: "text" | "offer") {
+    if (!active) return;
+    setLoading(true);
+    try {
+      if (kind === "text") {
+        const text = chatText.trim();
+        if (!text) return;
+        const m = await api<ChatMessage>(`/shifts/${active.shift.id}/chat`, {
+          method: "POST",
+          body: JSON.stringify({ kind: "text", message: text }),
+        });
+        setChat((prev) => [...prev, m]);
+        setChatText("");
+      } else {
+        const amt = Number(offerAmount);
+        if (!Number.isFinite(amt) || amt < 100) throw new Error("Invalid offer amount");
+        const m = await api<ChatMessage>(`/shifts/${active.shift.id}/chat`, {
+          method: "POST",
+          body: JSON.stringify({ kind: "offer", offer_amount_inr: amt }),
+        });
+        setChat((prev) => [...prev, m]);
+      }
+    } catch (e) {
+      Alert.alert("Chat error", e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function respondOffer(messageId: string, action: "accept" | "reject") {
+    if (!active) return;
+    setLoading(true);
+    try {
+      const m = await api<ChatMessage>(`/chat/${messageId}/offer/respond`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      setChat((prev) => prev.map((x) => (x.id === m.id ? m : x)));
+      const s = await api<Shift>(`/shifts/${active.shift.id}`);
+      setActive((prev) => (prev ? { ...prev, shift: s } : prev));
+    } catch (e) {
+      Alert.alert("Offer error", e instanceof Error ? e.message : "Failed");
     } finally {
       setLoading(false);
     }
@@ -377,6 +516,12 @@ export default function App() {
 
   async function endLive() {
     await stopBackgroundTracking();
+    try {
+      shiftSocketRef.current?.disconnect?.();
+    } catch {
+      // ignore
+    }
+    shiftSocketRef.current = null;
     setActive(null);
     setScreen("jobs");
     await refreshJobs();
@@ -539,6 +684,62 @@ export default function App() {
             <View style={{ flexDirection: "row", gap: 10 }}>
               <PrimaryButton title="SOS" onPress={sos} disabled={loading} />
               <PrimaryButton title="End" onPress={endLive} variant="ghost" />
+            </View>
+
+            {/* Chat + negotiation */}
+            <Text style={[styles.label, { marginTop: 6 }]}>Chat & negotiation</Text>
+            <View style={[styles.card, { marginBottom: 0 }]}>
+              <ScrollView style={{ maxHeight: 180 }}>
+                {chat.map((m) => (
+                  <View
+                    key={m.id}
+                    style={{
+                      padding: 10,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: "rgba(2,132,199,0.15)",
+                      backgroundColor: m.sender_role.startsWith("clinic") ? "rgba(2,132,199,0.06)" : "rgba(255,255,255,0.7)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={{ fontWeight: "900", fontSize: 11 }}>{m.sender_role.toUpperCase()}</Text>
+                      <Text style={{ fontSize: 11, color: "rgba(15,23,42,0.6)" }}>
+                        {new Date(m.created_at).toLocaleTimeString()}
+                      </Text>
+                    </View>
+                    {m.kind === "offer" ? (
+                      <>
+                        <Text style={{ marginTop: 4, fontWeight: "900" }}>Offer: ₹ {m.offer_amount_inr}</Text>
+                        <Text style={{ marginTop: 2, fontSize: 12, color: "rgba(15,23,42,0.7)" }}>
+                          Status: {(m.offer_status ?? "proposed").toUpperCase()}
+                        </Text>
+                        {m.offer_status === "proposed" && m.sender_role.startsWith("clinic") ? (
+                          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+                            <PrimaryButton title="Reject" onPress={() => respondOffer(m.id, "reject")} variant="ghost" />
+                            <PrimaryButton title="Accept" onPress={() => respondOffer(m.id, "accept")} />
+                          </View>
+                        ) : null}
+                      </>
+                    ) : (
+                      <Text style={{ marginTop: 4 }}>{m.message}</Text>
+                    )}
+                  </View>
+                ))}
+                {chat.length === 0 ? <Text style={styles.hint}>No messages yet.</Text> : null}
+              </ScrollView>
+
+              <Text style={styles.label}>Message</Text>
+              <TextInput style={styles.input} value={chatText} onChangeText={setChatText} />
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                <PrimaryButton title="Send" onPress={() => sendChat("text")} disabled={loading} />
+              </View>
+
+              <Text style={styles.label}>Offer amount (₹)</Text>
+              <TextInput style={styles.input} value={offerAmount} onChangeText={setOfferAmount} keyboardType="number-pad" />
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                <PrimaryButton title="Propose" onPress={() => sendChat("offer")} disabled={loading} variant="ghost" />
+              </View>
             </View>
           </View>
         </View>

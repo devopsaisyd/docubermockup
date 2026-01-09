@@ -61,6 +61,68 @@ export function demoRoute(path: string, init?: RequestInit): unknown {
   if (path === "/auth/otp/request") return { ok: true, dev_otp: "123456" };
   if (path === "/auth/otp/verify") return { access_token: "demo-token" };
 
+  if (path.startsWith("/shifts/") && path.endsWith("/chat") && (init?.method ?? "GET") === "GET") {
+    return [
+      {
+        id: "demo-chat-1",
+        shift_id: "demo-shift-1",
+        assignment_id: "demo-asg-1",
+        sender_user_id: "demo-user-clinic",
+        sender_role: "clinic_admin",
+        kind: "text",
+        message: "Hi Doctor, can you reach by 8:45?",
+        offer_amount_inr: null,
+        offer_status: null,
+        created_at: new Date(now - 6 * 60 * 1000).toISOString(),
+      },
+      {
+        id: "demo-chat-2",
+        shift_id: "demo-shift-1",
+        assignment_id: "demo-asg-1",
+        sender_user_id: "demo-user-doc",
+        sender_role: "doctor",
+        kind: "offer",
+        message: null,
+        offer_amount_inr: 4000,
+        offer_status: "proposed",
+        created_at: new Date(now - 2 * 60 * 1000).toISOString(),
+      },
+    ];
+  }
+
+  if (path.startsWith("/shifts/") && path.endsWith("/chat") && init?.method === "POST") {
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    const kind = body.kind ?? "text";
+    return {
+      id: `demo-chat-${Math.random().toString(16).slice(2)}`,
+      shift_id: path.split("/")[2],
+      assignment_id: "demo-asg-1",
+      sender_user_id: "demo-user-clinic",
+      sender_role: "clinic_admin",
+      kind,
+      message: kind === "text" ? (body.message ?? "") : null,
+      offer_amount_inr: kind === "offer" ? (body.offer_amount_inr ?? 3500) : null,
+      offer_status: kind === "offer" ? "proposed" : null,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  if (path.startsWith("/chat/") && path.endsWith("/offer/respond") && init?.method === "POST") {
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    return {
+      id: path.split("/")[2],
+      shift_id: "demo-shift-1",
+      assignment_id: "demo-asg-1",
+      sender_user_id: "demo-user-doc",
+      sender_role: "doctor",
+      kind: "offer",
+      message: null,
+      offer_amount_inr: 4000,
+      offer_status: body.action === "accept" ? "accepted" : "rejected",
+      created_at: new Date(now - 2 * 60 * 1000).toISOString(),
+    };
+  }
+
   if (path === "/clinics/me" && (init?.method ?? "GET") === "GET") {
     return {
       id: "demo-clinic",

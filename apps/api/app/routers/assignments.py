@@ -23,6 +23,7 @@ from app.schemas.assignments import (
     SosIn,
 )
 from app.services.audit import emit_timeline_update, record_event
+from app.services.google_maps import distance_matrix_eta
 from app.services.shift_state import ensure_transition, now_utc, tracking_window_active
 
 
@@ -157,7 +158,7 @@ async def location_ping(
 
 
 @router.get("/assignments/{assignment_id}/live", response_model=LiveSnapshotOut)
-def live_snapshot(
+async def live_snapshot(
     assignment_id: uuid.UUID,
     user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff, Role.doctor)),
     db: Session = Depends(get_db),
@@ -184,6 +185,21 @@ def live_snapshot(
     checkout_at = checkout_ev.created_at if checkout_ev else None
     active = tracking_window_active(shift_start=shift.start_time, shift_end=shift.end_time, checkout_at=checkout_at)
 
+    eta_minutes = None
+    distance_m = None
+    if last_ping and active:
+        # Compute ETA from last ping to clinic (en_route)
+        clinic = db.get(ClinicProfile, shift.clinic_profile_id)
+        if clinic:
+            eta = await distance_matrix_eta(
+                origin_lat=last_ping.lat,
+                origin_lng=last_ping.lng,
+                dest_lat=clinic.lat,
+                dest_lng=clinic.lng,
+            )
+            eta_minutes = eta.eta_minutes
+            distance_m = eta.distance_m
+
     # Privacy: clinics can only see location during duty window.
     if user.role in (Role.clinic_admin, Role.clinic_staff) and not active:
         last_ping = None
@@ -193,6 +209,8 @@ def live_snapshot(
         shift_id=shift.id,
         status=shift.status.value,
         tracking_active=active,
+        eta_minutes=eta_minutes,
+        distance_m=distance_m,
         last_ping=(
             {
                 "ts": last_ping.ts.isoformat(),

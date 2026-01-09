@@ -35,6 +35,8 @@ class LiveSnapshotOut(BaseModel):
     shift_id: UUID
     status: str
     tracking_active: bool
+    eta_minutes: int | None = None
+    distance_m: int | None = None
     last_ping: dict | None
     timeline: list[dict]
 

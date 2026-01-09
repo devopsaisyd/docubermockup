@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { io, Socket } from "socket.io-client";
 
-import { Card, Button, Chip } from "@/components/ui";
+import { Card, Button, Chip, Input } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { API_BASE_URL, GOOGLE_MAPS_KEY } from "@/lib/config";
@@ -34,6 +34,16 @@ type Candidate = {
   reliability: { on_time_rate: number; avg_rating: number; cancels_count: number; no_show_count: number };
 };
 
+type ChatMessage = {
+  id: string;
+  kind: "text" | "offer" | string;
+  sender_role: string;
+  message: string | null;
+  offer_amount_inr: number | null;
+  offer_status: "proposed" | "accepted" | "rejected" | null;
+  created_at: string;
+};
+
 export default function ShiftDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -47,6 +57,10 @@ export default function ShiftDetailPage() {
   const [live, setLive] = useState<{ lat: number; lng: number; ts: string } | null>(null);
   const [timeline, setTimeline] = useState<{ event_type: string; ts: string; payload: any }[]>([]);
   const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [offerAmount, setOfferAmount] = useState("3500");
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const { isLoaded } = useJsApiLoader({
     id: "google-map-script",
@@ -69,6 +83,8 @@ export default function ShiftDetailPage() {
         const lp = snap.last_ping;
         if (lp) setLive({ lat: lp.lat, lng: lp.lng, ts: lp.ts });
       }
+      const msgs = await api<ChatMessage[]>(`/shifts/${shiftId}/chat`);
+      setChat(msgs);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
       else setError(e instanceof ApiError ? e.message : "Failed to load");
@@ -84,7 +100,6 @@ export default function ShiftDetailPage() {
 
   // Socket.io live updates
   useEffect(() => {
-    if (!shift?.assignment_id) return;
     const token = getToken();
     if (!token) return;
 
@@ -93,17 +108,47 @@ export default function ShiftDetailPage() {
       transports: ["websocket"],
       auth: { token },
     });
-    socket.emit("join_assignment", { assignment_id: shift.assignment_id });
-    socket.on("assignment_update", (msg: any) => {
-      if (msg?.event_type === "location_ping" && msg?.payload?.lat && msg?.payload?.lng) {
-        setLive({ lat: msg.payload.lat, lng: msg.payload.lng, ts: msg.payload.ts ?? msg.ts });
+    if (shift?.assignment_id) {
+      socket.emit("join_assignment", { assignment_id: shift.assignment_id });
+      socket.on("assignment_update", (msg: any) => {
+        if (msg?.event_type === "location_ping" && msg?.payload?.lat && msg?.payload?.lng) {
+          setLive({ lat: msg.payload.lat, lng: msg.payload.lng, ts: msg.payload.ts ?? msg.ts });
+        }
+        setTimeline((prev) => [...prev, { event_type: msg.event_type, ts: msg.ts, payload: msg.payload }]);
+      });
+    }
+    socket.emit("join_shift", { shift_id: shiftId });
+    socket.on("shift_update", (msg: any) => {
+      if (msg?.type === "chat_message" && msg?.message) {
+        setChat((prev) => [
+          ...prev,
+          {
+            id: msg.message.id,
+            kind: msg.message.kind,
+            sender_role: msg.message.sender_role,
+            message: msg.message.message ?? null,
+            offer_amount_inr: msg.message.offer_amount_inr ?? null,
+            offer_status: msg.message.offer_status ?? null,
+            created_at: msg.message.created_at ?? msg.ts,
+          },
+        ]);
       }
-      setTimeline((prev) => [...prev, { event_type: msg.event_type, ts: msg.ts, payload: msg.payload }]);
+      if (msg?.type === "offer_update") {
+        setChat((prev) =>
+          prev.map((m) =>
+            m.id === msg.message_id ? { ...m, offer_status: msg.offer_status ?? m.offer_status } : m
+          )
+        );
+      }
     });
     return () => {
       socket.disconnect();
     };
-  }, [shift?.assignment_id]);
+  }, [shift?.assignment_id, shiftId]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chat.length]);
 
   const statusTone = useMemo(() => {
     const s = shift?.status;
@@ -156,6 +201,53 @@ export default function ShiftDetailPage() {
       setDevOtp(res.dev_otp ?? null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "OTP create failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function sendChat(kind: "text" | "offer") {
+    setLoading(true);
+    setError(null);
+    try {
+      if (kind === "text") {
+        const text = chatText.trim();
+        if (!text) return;
+        const m = await api<ChatMessage>(`/shifts/${shiftId}/chat`, {
+          method: "POST",
+          body: JSON.stringify({ kind: "text", message: text }),
+        });
+        setChat((prev) => [...prev, m]);
+        setChatText("");
+        return;
+      }
+      const amt = Number(offerAmount);
+      if (!Number.isFinite(amt) || amt < 100) throw new Error("Offer amount invalid");
+      const m = await api<ChatMessage>(`/shifts/${shiftId}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ kind: "offer", offer_amount_inr: amt }),
+      });
+      setChat((prev) => [...prev, m]);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Chat failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function respondOffer(messageId: string, action: "accept" | "reject") {
+    setLoading(true);
+    setError(null);
+    try {
+      const m = await api<ChatMessage>(`/chat/${messageId}/offer/respond`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      setChat((prev) => prev.map((x) => (x.id === m.id ? m : x)));
+      // Refresh shift pay amount after accept
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Offer action failed");
     } finally {
       setLoading(false);
     }
@@ -304,6 +396,73 @@ export default function ShiftDetailPage() {
                 </div>
               </>
             ) : null}
+
+            <div className="mt-6 text-sm font-bold">Chat & negotiation</div>
+            <div className="mt-3 rounded-2xl border border-black/10 bg-white/70 dark:bg-white/5 dark:border-white/10">
+              <div className="max-h-[260px] overflow-auto p-3 space-y-2">
+                {chat.map((m) => (
+                  <div
+                    key={m.id}
+                    className={[
+                      "rounded-xl p-3 border border-black/10 dark:border-white/10",
+                      m.sender_role.startsWith("clinic") ? "bg-sky-50 dark:bg-sky-500/10" : "bg-white/60 dark:bg-white/5",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-black text-slate-700 dark:text-slate-200">
+                        {m.sender_role.toUpperCase()}
+                      </div>
+                      <div className="text-[11px] text-slate-500">{new Date(m.created_at).toLocaleTimeString()}</div>
+                    </div>
+                    {m.kind === "offer" ? (
+                      <div className="mt-1">
+                        <div className="text-sm font-extrabold">Offer: ₹ {m.offer_amount_inr}</div>
+                        <div className="mt-1 flex items-center justify-between">
+                          <Chip tone={m.offer_status === "accepted" ? "green" : m.offer_status === "rejected" ? "red" : "blue"}>
+                            {(m.offer_status ?? "proposed").toUpperCase()}
+                          </Chip>
+                          {m.offer_status === "proposed" ? (
+                            <div className="flex gap-2">
+                              <Button variant="ghost" onClick={() => respondOffer(m.id, "reject")} disabled={loading}>
+                                Reject
+                              </Button>
+                              <Button onClick={() => respondOffer(m.id, "accept")} disabled={loading}>
+                                Accept
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-sm text-slate-700 dark:text-slate-200">{m.message}</div>
+                    )}
+                  </div>
+                ))}
+                {chat.length === 0 ? <div className="text-sm text-slate-500">No messages yet.</div> : null}
+                <div ref={chatEndRef} />
+              </div>
+              <div className="border-t border-black/10 dark:border-white/10 p-3 space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    value={chatText}
+                    onChange={(e) => setChatText(e.target.value)}
+                    placeholder="Message…"
+                  />
+                  <Button onClick={() => sendChat("text")} disabled={loading}>
+                    Send
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Input value={offerAmount} onChange={(e) => setOfferAmount(e.target.value)} inputMode="numeric" />
+                  <Button variant="ghost" onClick={() => sendChat("offer")} disabled={loading}>
+                    Propose ₹
+                  </Button>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Accepting an offer updates the shift pay amount for invoicing.
+                </div>
+              </div>
+            </div>
           </Card>
         </div>
       </div>
