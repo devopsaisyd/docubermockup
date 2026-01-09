@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -18,6 +19,7 @@ import MapView, { Marker } from "react-native-maps";
 
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const LOCATION_TASK = "locummap-location-task";
+const SCREENSHOT_MODE = process.env.EXPO_PUBLIC_SCREENSHOT_MODE === "true";
 
 type Role = "doctor";
 
@@ -114,7 +116,17 @@ async function stopBackgroundTracking() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<"login" | "profile" | "jobs" | "live">("login");
+  const [screen, setScreen] = useState<"login" | "profile" | "jobs" | "live">(() => {
+    if (!SCREENSHOT_MODE || Platform.OS !== "web") return "login";
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const s = q.get("screen");
+      if (s === "profile" || s === "jobs" || s === "live" || s === "login") return s;
+    } catch {
+      // ignore
+    }
+    return "login";
+  });
   const [loading, setLoading] = useState(false);
   const [phone, setPhone] = useState("9100000100");
   const [otp, setOtp] = useState("");
@@ -131,6 +143,61 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      if (SCREENSHOT_MODE) {
+        // Static demo state for screenshots (no network, no permissions).
+        setDevOtp("123456");
+        setMe({
+          id: "demo-docp-1",
+          full_name: "Dr. Meena Iyer",
+          specialty: "dentist_general",
+          reg_no: "TN-DENT-12345",
+          verification_status: "approved",
+        });
+        setFullName("Dr. Meena Iyer");
+        setSpecialty("dentist_general");
+        setRegNo("TN-DENT-12345");
+        setJobs([
+          {
+            id: "demo-shift-1",
+            specialty: "dentist_general",
+            start_time: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            end_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+            pay_amount_inr: 3500,
+            address: "T. Nagar, Chennai",
+            lat: 13.0418,
+            lng: 80.2341,
+            status: "posted",
+          },
+          {
+            id: "demo-shift-2",
+            specialty: "dentist_general",
+            start_time: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+            end_time: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
+            pay_amount_inr: 4000,
+            address: "Mylapore, Chennai",
+            lat: 13.0337,
+            lng: 80.2692,
+            status: "posted",
+          },
+        ]);
+        setActive({
+          assignmentId: "demo-asg-1",
+          shift: {
+            id: "demo-shift-1",
+            specialty: "dentist_general",
+            start_time: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            end_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+            pay_amount_inr: 3500,
+            address: "T. Nagar, Chennai",
+            lat: 13.0418,
+            lng: 80.2341,
+            status: "en_route",
+            assignment_id: "demo-asg-1",
+          },
+        });
+        setCurrentLoc({ lat: 13.0379, lng: 80.2405 });
+        return;
+      }
       const tok = await AsyncStorage.getItem("locummap_token");
       if (tok) {
         await bootstrap();
@@ -416,20 +483,37 @@ export default function App() {
             </Text>
           </View>
           <View style={{ flex: 1, marginHorizontal: 16, borderRadius: 18, overflow: "hidden" }}>
-            <MapView
-              style={{ flex: 1 }}
-              initialRegion={{
-                latitude: active.shift.lat,
-                longitude: active.shift.lng,
-                latitudeDelta: 0.03,
-                longitudeDelta: 0.03,
-              }}
-            >
-              <Marker coordinate={{ latitude: active.shift.lat, longitude: active.shift.lng }} title="Clinic" />
-              {currentLoc ? (
-                <Marker coordinate={{ latitude: currentLoc.lat, longitude: currentLoc.lng }} title="You" />
-              ) : null}
-            </MapView>
+            {Platform.OS === "web" ? (
+              <View style={styles.webMap}>
+                <View style={styles.webPin}>
+                  <Text style={{ fontWeight: "900" }}>Clinic</Text>
+                  <Text style={styles.hint}>
+                    {active.shift.lat.toFixed(4)}, {active.shift.lng.toFixed(4)}
+                  </Text>
+                </View>
+                <View style={[styles.webPin, { top: 160, left: 190, borderColor: "rgba(16,185,129,0.35)" }]}>
+                  <Text style={{ fontWeight: "900" }}>You</Text>
+                  <Text style={styles.hint}>
+                    {(currentLoc?.lat ?? 13.0379).toFixed(4)}, {(currentLoc?.lng ?? 80.2405).toFixed(4)}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <MapView
+                style={{ flex: 1 }}
+                initialRegion={{
+                  latitude: active.shift.lat,
+                  longitude: active.shift.lng,
+                  latitudeDelta: 0.03,
+                  longitudeDelta: 0.03,
+                }}
+              >
+                <Marker coordinate={{ latitude: active.shift.lat, longitude: active.shift.lng }} title="Clinic" />
+                {currentLoc ? (
+                  <Marker coordinate={{ latitude: currentLoc.lat, longitude: currentLoc.lng }} title="You" />
+                ) : null}
+              </MapView>
+            )}
           </View>
 
           <View style={{ padding: 16, gap: 10 }}>
@@ -533,5 +617,24 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(2,132,199,0.15)",
+  },
+  webMap: {
+    flex: 1,
+    backgroundColor: "#e0f2fe",
+    borderWidth: 1,
+    borderColor: "rgba(2,132,199,0.18)",
+    borderRadius: 18,
+    position: "relative",
+    overflow: "hidden",
+  },
+  webPin: {
+    position: "absolute",
+    top: 90,
+    left: 120,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    borderRadius: 16,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "rgba(2,132,199,0.25)",
   },
 });
