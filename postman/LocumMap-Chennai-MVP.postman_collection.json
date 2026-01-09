@@ -1,0 +1,115 @@
+{
+  "info": {
+    "name": "LocumMap Chennai (MVP)",
+    "_postman_id": "b2b0c3df-2a2d-4cdb-9b8a-0c6d5c60c0c1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth - OTP request",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/auth/otp/request", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "request"] },
+        "body": { "mode": "raw", "raw": "{\n  \"phone\": \"9000000001\",\n  \"role_hint\": \"clinic_admin\"\n}\n" }
+      }
+    },
+    {
+      "name": "Auth - OTP verify (clinic_admin)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+        "body": { "mode": "raw", "raw": "{\n  \"phone\": \"9000000001\",\n  \"otp\": \"123456\",\n  \"role\": \"clinic_admin\"\n}\n" }
+      }
+    },
+    {
+      "name": "Clinics - upsert me",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/clinics/me", "host": ["{{baseUrl}}"], "path": ["clinics", "me"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Lakshmi Dental Clinic\",\n  \"address\": \"T. Nagar, Chennai\",\n  \"city\": \"Chennai\",\n  \"lat\": 13.0418,\n  \"lng\": 80.2341\n}\n"
+        }
+      }
+    },
+    {
+      "name": "Shifts - create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/shifts", "host": ["{{baseUrl}}"], "path": ["shifts"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"specialty\": \"dentist_general\",\n  \"start_time\": \"2026-01-10T09:00:00Z\",\n  \"end_time\": \"2026-01-10T13:00:00Z\",\n  \"pay_amount_inr\": 3500,\n  \"address\": \"T. Nagar, Chennai\",\n  \"lat\": 13.0418,\n  \"lng\": 80.2341,\n  \"notes\": \"MVP\",\n  \"auto_replace\": false\n}\n"
+        }
+      }
+    },
+    {
+      "name": "Shifts - candidates",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": { "raw": "{{baseUrl}}/shifts/:shiftId/candidates", "host": ["{{baseUrl}}"], "path": ["shifts", ":shiftId", "candidates"] }
+      }
+    },
+    {
+      "name": "Shifts - book (clinic chooses doctor)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/shifts/:shiftId/book", "host": ["{{baseUrl}}"], "path": ["shifts", ":shiftId", "book"] },
+        "body": { "mode": "raw", "raw": "{\n  \"doctor_user_id\": \"00000000-0000-0000-0000-000000000000\"\n}\n" }
+      }
+    },
+    {
+      "name": "Assignments - live snapshot",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": { "raw": "{{baseUrl}}/assignments/:assignmentId/live", "host": ["{{baseUrl}}"], "path": ["assignments", ":assignmentId", "live"] }
+      }
+    },
+    {
+      "name": "OTP - create checkin (clinic)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/assignments/:assignmentId/otp/create?type=checkin",
+          "host": ["{{baseUrl}}"],
+          "path": ["assignments", ":assignmentId", "otp", "create"],
+          "query": [{ "key": "type", "value": "checkin" }]
+        }
+      }
+    },
+    {
+      "name": "Payments - create order",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/payments/create-order", "host": ["{{baseUrl}}"], "path": ["payments", "create-order"] },
+        "body": { "mode": "raw", "raw": "{\n  \"shift_id\": \"00000000-0000-0000-0000-000000000000\"\n}\n" }
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,17 @@
+{
+  "name": "locummap-chennai-mvp",
+  "private": true,
+  "packageManager": "pnpm@10.27.0",
+  "pnpm": {
+    "overrides": {
+      "@types/react": "19.2.7"
+    }
+  },
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "format": "pnpm -r format"
+  }
+}
+

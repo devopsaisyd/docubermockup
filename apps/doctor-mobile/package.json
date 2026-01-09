@@ -1,0 +1,29 @@
+{
+  "name": "doctor-mobile",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@locummap/shared": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~54.0.31",
+    "expo-location": "~19.0.7",
+    "expo-task-manager": "~14.0.7",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-maps": "1.20.1",
+    "socket.io-client": "^4.8.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
