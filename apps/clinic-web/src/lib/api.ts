@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "@/lib/config";
 import { getToken } from "@/lib/auth";
+import { DEMO_MODE, demoRoute } from "@/lib/demo";
 
 export class ApiError extends Error {
   status: number;
@@ -13,6 +14,10 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  if (DEMO_MODE) {
+    // demo mode: avoid backend dependency (for screenshots)
+    return demoRoute(path, init) as T;
+  }
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
