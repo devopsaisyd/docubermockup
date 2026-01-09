@@ -60,6 +60,7 @@ export default function ShiftDetailPage() {
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [offerAmount, setOfferAmount] = useState("3500");
+  const [eta, setEta] = useState<{ eta_minutes?: number | null; distance_m?: number | null } | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const { isLoaded } = useJsApiLoader({
@@ -82,6 +83,7 @@ export default function ShiftDetailPage() {
         setTimeline(snap.timeline ?? []);
         const lp = snap.last_ping;
         if (lp) setLive({ lat: lp.lat, lng: lp.lng, ts: lp.ts });
+        setEta({ eta_minutes: snap.eta_minutes ?? null, distance_m: snap.distance_m ?? null });
       }
       const msgs = await api<ChatMessage[]>(`/shifts/${shiftId}/chat`);
       setChat(msgs);
@@ -149,6 +151,30 @@ export default function ShiftDetailPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.length]);
+
+  // Refresh ETA every ~30s while en_route
+  useEffect(() => {
+    if (!shift?.assignment_id) return;
+    if (shift.status !== "en_route") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const snap = await api<any>(`/assignments/${shift.assignment_id}/live`);
+        if (cancelled) return;
+        setEta({ eta_minutes: snap.eta_minutes ?? null, distance_m: snap.distance_m ?? null });
+        const lp = snap.last_ping;
+        if (lp) setLive({ lat: lp.lat, lng: lp.lng, ts: lp.ts });
+      } catch {
+        // ignore
+      }
+    };
+    const id = window.setInterval(tick, 30000);
+    tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [shift?.assignment_id, shift?.status]);
 
   const statusTone = useMemo(() => {
     const s = shift?.status;
@@ -319,6 +345,11 @@ export default function ShiftDetailPage() {
             {live ? (
               <div className="mt-3 text-xs text-slate-500">
                 Last ping: {new Date(live.ts).toLocaleTimeString()} · {live.lat.toFixed(5)}, {live.lng.toFixed(5)}
+              </div>
+            ) : null}
+            {eta?.eta_minutes != null ? (
+              <div className="mt-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                ETA: {eta.eta_minutes} mins · {eta.distance_m != null ? `${Math.round(eta.distance_m / 1000)} km` : ""}
               </div>
             ) : null}
 

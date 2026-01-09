@@ -199,6 +199,8 @@ export function demoRoute(path: string, init?: RequestInit): unknown {
       shift_id: "demo-shift-1",
       status: "en_route",
       tracking_active: true,
+      eta_minutes: 18,
+      distance_m: 7200,
       last_ping: { ts: new Date().toISOString(), lat: 13.0379, lng: 80.2405, accuracy: 10 },
       timeline: [
         { event_type: "shift_posted", ts: new Date(now - 2 * 60 * 60 * 1000).toISOString(), payload: {} },

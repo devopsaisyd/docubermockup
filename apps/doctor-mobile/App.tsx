@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -52,6 +53,17 @@ type ChatMessage = {
   offer_status: "proposed" | "accepted" | "rejected" | null;
   created_at: string;
 };
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await AsyncStorage.getItem("locummap_token");
@@ -484,6 +496,17 @@ export default function App() {
     });
   }
 
+  async function navigateToClinic() {
+    if (!active) return;
+    const { lat, lng } = active.shift;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Navigation", "Could not open Google Maps.");
+    }
+  }
+
   async function verifyShiftOtp(type: "checkin" | "checkout") {
     if (!active) return;
     if (!otp.trim()) {
@@ -671,10 +694,26 @@ export default function App() {
           </View>
 
           <View style={{ padding: 16, gap: 10 }}>
+            {/* Find each other: live distance + navigate */}
+            <View style={[styles.card, { marginBottom: 0 }]}>
+              <Text style={{ fontWeight: "900" }}>Meetup</Text>
+              <Text style={styles.hint}>
+                Clinic: {active.shift.lat.toFixed(4)}, {active.shift.lng.toFixed(4)}
+              </Text>
+              {currentLoc ? (
+                <Text style={styles.hint}>
+                  Distance: {Math.round(haversineM(currentLoc.lat, currentLoc.lng, active.shift.lat, active.shift.lng) / 1000)} km (approx)
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                <PrimaryButton title="Navigate" onPress={navigateToClinic} />
+                <PrimaryButton title="Ping now" onPress={async () => {
+                  try { await pingOnce(); Alert.alert("OK", "Location sent"); } catch (e) { Alert.alert("Error", e instanceof Error ? e.message : "Failed"); }
+                }} disabled={loading} variant="ghost" />
+              </View>
+            </View>
+
             <PrimaryButton title="Set En Route" onPress={setEnRoute} disabled={loading} />
-            <PrimaryButton title="Ping now" onPress={async () => {
-              try { await pingOnce(); Alert.alert("OK", "Location sent"); } catch (e) { Alert.alert("Error", e instanceof Error ? e.message : "Failed"); }
-            }} disabled={loading} variant="ghost" />
             <Text style={styles.label}>OTP (from clinic)</Text>
             <TextInput style={styles.input} value={otp} onChangeText={setOtp} keyboardType="number-pad" />
             <View style={{ flexDirection: "row", gap: 10 }}>
