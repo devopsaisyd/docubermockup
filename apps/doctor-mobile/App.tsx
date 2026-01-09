@@ -15,7 +15,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
 
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const LOCATION_TASK = "locummap-location-task";
@@ -91,6 +90,16 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
     // ignore
   }
 });
+
+// Avoid bundling react-native-maps on web builds (not supported).
+let NativeMapView: any = null;
+let NativeMarker: any = null;
+if (Platform.OS !== "web") {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const maps = require("react-native-maps");
+  NativeMapView = maps.default;
+  NativeMarker = maps.Marker;
+}
 
 async function startBackgroundTracking(assignmentId: string) {
   await AsyncStorage.setItem("locummap_active_assignment_id", assignmentId);
@@ -499,7 +508,7 @@ export default function App() {
                 </View>
               </View>
             ) : (
-              <MapView
+              <NativeMapView
                 style={{ flex: 1 }}
                 initialRegion={{
                   latitude: active.shift.lat,
@@ -508,11 +517,11 @@ export default function App() {
                   longitudeDelta: 0.03,
                 }}
               >
-                <Marker coordinate={{ latitude: active.shift.lat, longitude: active.shift.lng }} title="Clinic" />
+                <NativeMarker coordinate={{ latitude: active.shift.lat, longitude: active.shift.lng }} title="Clinic" />
                 {currentLoc ? (
-                  <Marker coordinate={{ latitude: currentLoc.lat, longitude: currentLoc.lng }} title="You" />
+                  <NativeMarker coordinate={{ latitude: currentLoc.lat, longitude: currentLoc.lng }} title="You" />
                 ) : null}
-              </MapView>
+              </NativeMapView>
             )}
           </View>
 
