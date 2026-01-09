@@ -175,6 +175,7 @@ export default function App() {
   const [chatText, setChatText] = useState("");
   const [offerAmount, setOfferAmount] = useState("3500");
   const shiftSocketRef = useRef<any>(null);
+  const lobbySocketRef = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -271,10 +272,52 @@ export default function App() {
       setRegNo(d.reg_no);
       setScreen("jobs");
       await refreshJobs();
+      await connectLobbySocket(d.specialty);
     } catch {
       setScreen("profile");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function connectLobbySocket(specialty: MeDoctor["specialty"]) {
+    try {
+      const token = await AsyncStorage.getItem("locummap_token");
+      if (!token) return;
+      if (!lobbySocketRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { io } = require("socket.io-client");
+        lobbySocketRef.current = io(API_BASE_URL, {
+          path: "/ws/socket.io",
+          transports: ["websocket"],
+          auth: { token },
+        });
+        lobbySocketRef.current.on("specialty_update", (msg: any) => {
+          if (msg?.type === "shift_posted" && msg?.shift?.id) {
+            setJobs((prev) => {
+              const exists = prev.some((s) => s.id === msg.shift.id);
+              if (exists) return prev;
+              return [
+                {
+                  id: msg.shift.id,
+                  specialty: msg.shift.specialty,
+                  start_time: msg.shift.start_time,
+                  end_time: msg.shift.end_time,
+                  pay_amount_inr: msg.shift.pay_amount_inr,
+                  address: msg.shift.address,
+                  lat: msg.shift.lat,
+                  lng: msg.shift.lng,
+                  status: msg.shift.status,
+                },
+                ...prev,
+              ];
+            });
+          }
+        });
+      }
+      lobbySocketRef.current.emit("join_specialty", { specialty });
+    } catch {
+      // ignore
     }
   }
 
@@ -619,6 +662,12 @@ export default function App() {
               title="Logout"
               onPress={async () => {
                 await stopBackgroundTracking();
+                try {
+                  lobbySocketRef.current?.disconnect?.();
+                } catch {
+                  // ignore
+                }
+                lobbySocketRef.current = null;
                 await AsyncStorage.removeItem("locummap_token");
                 setScreen("login");
               }}

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
-from app.core.deps import require_role
+from app.core.deps import get_clinic_owner_id, require_role
 from app.core.geo import CHENNAI_POLYGON_LATLNG, haversine_m, point_in_polygon
 from app.db.session import get_db
 from app.models.clinic import ClinicProfile
@@ -19,6 +19,7 @@ from app.schemas.shifts import BookResultOut, CandidateOut, ShiftBookIn, ShiftCr
 from app.services.audit import record_event
 from app.services.google_maps import distance_matrix_eta
 from app.services.shift_state import assignment_status_from_shift_status, ensure_transition, now_utc
+from app.realtime.socketio import emit_specialty_broadcast
 
 
 router = APIRouter()
@@ -52,12 +53,13 @@ def _to_shift_out(db: Session, shift: Shift) -> ShiftOut:
 
 
 @router.post("/shifts", response_model=ShiftOut)
-def create_shift(
+async def create_shift(
     payload: ShiftCreateIn,
     user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff)),
     db: Session = Depends(get_db),
 ):
-    clinic = db.scalar(select(ClinicProfile).where(ClinicProfile.user_id == user.id))
+    owner_id = get_clinic_owner_id(user, db)
+    clinic = db.scalar(select(ClinicProfile).where(ClinicProfile.user_id == owner_id))
     if not clinic:
         raise HTTPException(status_code=400, detail="Create clinic profile first")
     if not point_in_polygon(payload.lat, payload.lng, CHENNAI_POLYGON_LATLNG):
@@ -66,7 +68,7 @@ def create_shift(
         raise HTTPException(status_code=400, detail="end_time must be after start_time")
 
     shift = Shift(
-        clinic_user_id=user.id,
+        clinic_user_id=owner_id,
         clinic_profile_id=clinic.id,
         specialty=payload.specialty,
         start_time=payload.start_time,
@@ -91,6 +93,24 @@ def create_shift(
     )
     db.commit()
     db.refresh(shift)
+    # Broadcast to doctors in the same specialty (bidding lobby)
+    await emit_specialty_broadcast(
+        shift.specialty.value,
+        {
+            "type": "shift_posted",
+            "shift": {
+                "id": str(shift.id),
+                "specialty": shift.specialty.value,
+                "start_time": shift.start_time.isoformat(),
+                "end_time": shift.end_time.isoformat(),
+                "pay_amount_inr": shift.pay_amount_inr,
+                "address": shift.address,
+                "lat": shift.lat,
+                "lng": shift.lng,
+                "status": shift.status.value,
+            },
+        },
+    )
     return _to_shift_out(db, shift)
 
 
@@ -99,7 +119,8 @@ def list_shifts(
     user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff)),
     db: Session = Depends(get_db),
 ):
-    rows = db.scalars(select(Shift).where(Shift.clinic_user_id == user.id).order_by(Shift.start_time.desc())).all()
+    owner_id = get_clinic_owner_id(user, db)
+    rows = db.scalars(select(Shift).where(Shift.clinic_user_id == owner_id).order_by(Shift.start_time.desc())).all()
     return [_to_shift_out(db, s) for s in rows]
 
 
@@ -112,8 +133,10 @@ def get_shift(
     shift = db.get(Shift, shift_id)
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
-    if user.role in (Role.clinic_admin, Role.clinic_staff) and shift.clinic_user_id != user.id:
-        raise HTTPException(status_code=403, detail="Not your shift")
+    if user.role in (Role.clinic_admin, Role.clinic_staff):
+        owner_id = get_clinic_owner_id(user, db)
+        if shift.clinic_user_id != owner_id:
+            raise HTTPException(status_code=403, detail="Not your shift")
     return _to_shift_out(db, shift)
 
 
@@ -124,7 +147,8 @@ async def candidates(
     db: Session = Depends(get_db),
 ):
     shift = db.get(Shift, shift_id)
-    if not shift or shift.clinic_user_id != user.id:
+    owner_id = get_clinic_owner_id(user, db)
+    if not shift or shift.clinic_user_id != owner_id:
         raise HTTPException(status_code=404, detail="Shift not found")
 
     doctors = db.scalars(
@@ -198,7 +222,8 @@ def book_shift(
     if user.role == Role.doctor:
         doctor_user_id = user.id
     else:
-        if shift.clinic_user_id != user.id:
+        owner_id = get_clinic_owner_id(user, db)
+        if shift.clinic_user_id != owner_id:
             raise HTTPException(status_code=403, detail="Not your shift")
         if not payload.doctor_user_id:
             raise HTTPException(status_code=400, detail="doctor_user_id required for clinic booking")

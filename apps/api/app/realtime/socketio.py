@@ -21,8 +21,8 @@ def room_for_assignment(assignment_id: uuid.UUID) -> str:
 def room_for_shift(shift_id: uuid.UUID) -> str:
     return f"shift:{shift_id}"
 
-def room_for_shift(shift_id: uuid.UUID) -> str:
-    return f"shift:{shift_id}"
+def room_for_specialty(specialty: str) -> str:
+    return f"specialty:{specialty}"
 
 
 @sio.event
@@ -147,6 +147,47 @@ async def leave_shift(sid, data):
     await sio.leave_room(sid, room_for_shift(shid))
 
 
+@sio.event
+async def join_specialty(sid, data):
+    """
+    Doctors join their specialty lobby to receive new posted shifts (broadcast bidding).
+    data: { specialty }
+    """
+    session = await sio.get_session(sid)
+    specialty = str((data or {}).get("specialty") or "").strip()
+    if not specialty:
+        return
+    try:
+        user_id = uuid.UUID(str(session.get("user_id")))
+        role = Role(str(session.get("role")))
+    except Exception:
+        return
+    if role != Role.doctor:
+        return
+
+    with SessionLocal() as db:
+        from sqlalchemy import select
+
+        doc = db.scalar(select(DoctorProfile).where(DoctorProfile.user_id == user_id))
+        if not doc:
+            return
+        if doc.verification_status.value != "approved":
+            return
+        if doc.specialty.value != specialty:
+            return
+
+    await sio.enter_room(sid, room_for_specialty(specialty))
+    await sio.emit("joined", {"specialty": specialty}, to=sid)
+
+
+@sio.event
+async def leave_specialty(sid, data):
+    specialty = str((data or {}).get("specialty") or "").strip()
+    if not specialty:
+        return
+    await sio.leave_room(sid, room_for_specialty(specialty))
+
+
 async def emit_assignment_update(assignment_id: uuid.UUID, payload: dict) -> None:
     await sio.emit("assignment_update", payload, room=room_for_assignment(assignment_id))
 
@@ -155,6 +196,6 @@ async def emit_shift_update(shift_id: uuid.UUID, payload: dict) -> None:
     await sio.emit("shift_update", payload, room=room_for_shift(shift_id))
 
 
-async def emit_shift_update(shift_id: uuid.UUID, payload: dict) -> None:
-    await sio.emit("shift_update", payload, room=room_for_shift(shift_id))
+async def emit_specialty_broadcast(specialty: str, payload: dict) -> None:
+    await sio.emit("specialty_update", payload, room=room_for_specialty(specialty))
 

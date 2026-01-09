@@ -6,16 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.core.deps import require_role
+from app.core.deps import get_clinic_owner_id, require_role
 from app.db.session import get_db
 from app.models.chat import ChatMessage
 from app.models.doctor import DoctorProfile
-from app.models.enums import Role, VerificationStatus
+from app.models.enums import AssignmentStatus, Role, ShiftStatus, VerificationStatus
 from app.models.shift import Shift
+from app.models.shift import ShiftAssignment
 from app.models.user import User
 from app.schemas.chat import ChatMessageOut, ChatSendIn, OfferRespondIn
 from app.services.audit import record_event
 from app.realtime.socketio import emit_shift_update
+from app.services.shift_state import now_utc
 
 
 router = APIRouter()
@@ -23,7 +25,8 @@ router = APIRouter()
 
 def _can_access_shift_chat(db: Session, *, user: User, shift: Shift) -> bool:
     if user.role in (Role.clinic_admin, Role.clinic_staff):
-        return shift.clinic_user_id == user.id
+        owner_id = get_clinic_owner_id(user, db)
+        return shift.clinic_user_id == owner_id
     if user.role == Role.doctor:
         if shift.assignment and shift.assignment.doctor_user_id == user.id:
             return True
@@ -110,7 +113,7 @@ async def send_message(
 async def respond_offer(
     message_id: uuid.UUID,
     payload: OfferRespondIn,
-    user: User = Depends(require_role(Role.clinic_admin, Role.doctor)),
+    user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff, Role.doctor)),
     db: Session = Depends(get_db),
 ):
     msg = db.get(ChatMessage, message_id)
@@ -120,8 +123,10 @@ async def respond_offer(
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
 
-    if user.role == Role.clinic_admin and shift.clinic_user_id != user.id:
-        raise HTTPException(status_code=403, detail="Not allowed")
+    if user.role in (Role.clinic_admin, Role.clinic_staff):
+        owner_id = get_clinic_owner_id(user, db)
+        if shift.clinic_user_id != owner_id:
+            raise HTTPException(status_code=403, detail="Not allowed")
     if user.role == Role.doctor:
         # must be eligible to negotiate this specialty (or assigned)
         if not _can_access_shift_chat(db, user=user, shift=shift):
@@ -144,6 +149,32 @@ async def respond_offer(
             event_type="offer_accepted",
             payload={"amount_inr": shift.pay_amount_inr},
         )
+
+        # If clinic accepts an offer on a posted shift, auto-book the offering doctor.
+        if user.role in (Role.clinic_admin, Role.clinic_staff) and shift.status == ShiftStatus.posted and not shift.assignment:
+            doc = db.scalar(select(DoctorProfile).where(DoctorProfile.user_id == msg.sender_user_id))
+            if not doc or doc.verification_status != VerificationStatus.approved:
+                raise HTTPException(status_code=400, detail="Doctor not available/verified")
+            if doc.specialty != shift.specialty:
+                raise HTTPException(status_code=400, detail="Specialty mismatch")
+            shift.status = ShiftStatus.booked
+            assignment = ShiftAssignment(
+                shift_id=shift.id,
+                doctor_user_id=msg.sender_user_id,
+                doctor_profile_id=doc.id,
+                status=AssignmentStatus.booked,
+                accepted_at=now_utc(),
+            )
+            db.add(assignment)
+            db.flush()
+            record_event(
+                db,
+                shift_id=shift.id,
+                assignment_id=assignment.id,
+                actor_user_id=user.id,
+                event_type="shift_booked_from_offer",
+                payload={"doctor_user_id": str(msg.sender_user_id), "amount_inr": shift.pay_amount_inr},
+            )
 
     db.commit()
     db.refresh(msg)
