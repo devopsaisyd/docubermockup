@@ -207,14 +207,76 @@ export default function ShiftDetailPage() {
         method: "POST",
         body: JSON.stringify({ shift_id: shift.id }),
       });
-      setError(
-        `Payment order created: ${res.provider_order_id}. (In demo, mark paid via webhook or Razorpay checkout if keys set.)`
-      );
+      const orderId: string = res.provider_order_id;
+      const keyId: string | null = res.razorpay_key_id ?? null;
+
+      // Demo fallback: if no key, mark paid immediately via confirm.
+      if (!keyId) {
+        await api("/payments/confirm", {
+          method: "POST",
+          body: JSON.stringify({
+            provider_order_id: orderId,
+            provider_payment_id: `demo_pay_${Math.random().toString(16).slice(2)}`,
+            provider_signature: null,
+          }),
+        });
+        setError("Payment confirmed (demo).");
+        return;
+      }
+
+      const ok = await loadRazorpay();
+      if (!ok) throw new Error("Razorpay SDK failed to load");
+
+      const rzp = new (window as any).Razorpay({
+        key: keyId,
+        amount: res.amount_inr * 100,
+        currency: "INR",
+        name: "LocumMap Chennai",
+        description: `Shift payment (${shift.specialty.replaceAll("_", " ")})`,
+        order_id: orderId,
+        prefill: {},
+        notes: { shift_id: shift.id },
+        theme: { color: "#0284c7" },
+        method: {
+          upi: true,
+          card: true,
+          netbanking: true,
+          wallet: true,
+        },
+        handler: async function (response: any) {
+          try {
+            await api("/payments/confirm", {
+              method: "POST",
+              body: JSON.stringify({
+                provider_order_id: response.razorpay_order_id,
+                provider_payment_id: response.razorpay_payment_id,
+                provider_signature: response.razorpay_signature,
+              }),
+            });
+            setError("Payment successful.");
+          } catch (e) {
+            setError(e instanceof ApiError ? e.message : "Payment confirm failed");
+          }
+        },
+      });
+      rzp.open();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Payment order failed");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadRazorpay(): Promise<boolean> {
+    if (typeof window === "undefined") return false;
+    if ((window as any).Razorpay) return true;
+    return await new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   }
 
   async function createOtp(type: "checkin" | "checkout") {

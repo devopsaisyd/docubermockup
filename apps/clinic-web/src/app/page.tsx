@@ -24,6 +24,12 @@ export default function Home() {
             >
               Open dashboard
             </Link>
+            <Link
+              href="/admin"
+              className="h-11 px-4 rounded-xl font-semibold bg-white/60 border border-black/10 hover:bg-white/80 inline-flex items-center dark:bg-white/10 dark:border-white/10 dark:hover:bg-white/15"
+            >
+              Admin
+            </Link>
           </div>
         </Card>
       </div>

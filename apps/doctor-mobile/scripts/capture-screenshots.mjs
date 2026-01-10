@@ -7,7 +7,8 @@ const pages = [
   { path: "/?screen=login", name: "01-login.png" },
   { path: "/?screen=profile", name: "02-profile.png" },
   { path: "/?screen=jobs", name: "03-jobs.png" },
-  { path: "/?screen=live", name: "04-live-shift.png" },
+  { path: "/?screen=earnings", name: "04-earnings.png" },
+  { path: "/?screen=live", name: "05-live-shift.png" },
 ];
 
 const browser = await chromium.launch();

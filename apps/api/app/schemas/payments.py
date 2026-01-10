@@ -17,6 +17,18 @@ class CreateOrderOut(BaseModel):
     razorpay_key_id: str | None = None
 
 
+class ConfirmPaymentIn(BaseModel):
+    provider_order_id: str
+    provider_payment_id: str
+    provider_signature: str | None = None
+
+
+class ConfirmPaymentOut(BaseModel):
+    ok: bool = True
+    status: str
+    shift_id: UUID
+
+
 class WebhookIn(BaseModel):
     # Razorpay sends arbitrary payload; keep raw.
     payload: dict = Field(default_factory=dict)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import admin, assignments, auth, chat, clinics, doctors, invoices, otp, payments, payouts, shifts
+from app.routers import admin, assignments, auth, billing, chat, clinics, doctors, invoices, otp, payments, payouts, shifts
 from app.realtime.socketio import sio
 
 import socketio
@@ -34,6 +34,7 @@ app.include_router(otp.router, prefix="", tags=["otp"])
 app.include_router(payments.router, prefix="", tags=["payments"])
 app.include_router(payouts.router, prefix="", tags=["payouts"])
 app.include_router(invoices.router, prefix="", tags=["invoices"])
+app.include_router(billing.router, prefix="", tags=["billing"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Socket.IO endpoint (ASGI)

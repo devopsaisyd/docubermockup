@@ -1225,6 +1225,52 @@
         ]
       }
     },
+    "/payments/confirm": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Confirm Payment",
+        "operationId": "confirm_payment_payments_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmPaymentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/payments/webhook": {
       "post": {
         "tags": [
@@ -1364,6 +1410,78 @@
             }
           }
         }
+      }
+    },
+    "/billing/clinic/payments": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Clinic Payments",
+        "operationId": "clinic_payments_billing_clinic_payments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/billing/clinic/invoices": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Clinic Invoices",
+        "operationId": "clinic_invoices_billing_clinic_invoices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/billing/doctor/earnings": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Doctor Earnings",
+        "operationId": "doctor_earnings_billing_doctor_earnings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/admin/doctors/{doctor_profile_id}/verify": {
@@ -1742,6 +1860,14 @@
           "distance_m": {
             "type": "integer",
             "title": "Distance M"
+          },
+          "acceptance_likelihood": {
+            "type": "number",
+            "title": "Acceptance Likelihood"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
           }
         },
         "type": "object",
@@ -1752,7 +1878,9 @@
           "specialty",
           "reliability",
           "eta_minutes",
-          "distance_m"
+          "distance_m",
+          "acceptance_likelihood",
+          "score"
         ],
         "title": "CandidateOut"
       },
@@ -1959,6 +2087,59 @@
           "lng"
         ],
         "title": "ClinicUpsertIn"
+      },
+      "ConfirmPaymentIn": {
+        "properties": {
+          "provider_order_id": {
+            "type": "string",
+            "title": "Provider Order Id"
+          },
+          "provider_payment_id": {
+            "type": "string",
+            "title": "Provider Payment Id"
+          },
+          "provider_signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_order_id",
+          "provider_payment_id"
+        ],
+        "title": "ConfirmPaymentIn"
+      },
+      "ConfirmPaymentOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "shift_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Shift Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "shift_id"
+        ],
+        "title": "ConfirmPaymentOut"
       },
       "CreateOrderIn": {
         "properties": {

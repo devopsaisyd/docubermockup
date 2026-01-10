@@ -13,6 +13,8 @@ from app.db.session import get_db
 from app.models.audit import AuditEvent
 from app.models.clinic import ClinicProfile
 from app.models.enums import AssignmentStatus, Role, ShiftStatus
+from app.models.enums import PaymentStatus
+from app.models.finance import Payment
 from app.models.shift import LocationPing, Shift, ShiftAssignment
 from app.models.user import User
 from app.schemas.assignments import (
@@ -28,6 +30,11 @@ from app.services.shift_state import ensure_transition, now_utc, tracking_window
 
 
 router = APIRouter()
+
+def _require_payment_paid(db: Session, shift_id: uuid.UUID) -> None:
+    p = db.scalar(select(Payment).where(Payment.shift_id == shift_id))
+    if not p or p.status != PaymentStatus.paid:
+        raise HTTPException(status_code=402, detail="Payment required before shift can proceed")
 
 
 def _load_assignment(db: Session, assignment_id: uuid.UUID) -> ShiftAssignment:
@@ -70,6 +77,7 @@ async def update_status(
     shift = db.get(Shift, a.shift_id)
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+    _require_payment_paid(db, shift.id)
 
     # Only allow advancing along strict machine (booked->en_route)
     if payload.status == AssignmentStatus.en_route:
@@ -105,6 +113,7 @@ async def location_ping(
     shift = db.get(Shift, a.shift_id)
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+    _require_payment_paid(db, shift.id)
     if shift.status not in (ShiftStatus.booked, ShiftStatus.en_route, ShiftStatus.checked_in):
         raise HTTPException(status_code=409, detail="Shift not trackable")
 
@@ -242,6 +251,7 @@ async def sos(
     shift = db.get(Shift, a.shift_id)
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+    _require_payment_paid(db, shift.id)
     record_event(
         db,
         shift_id=shift.id,

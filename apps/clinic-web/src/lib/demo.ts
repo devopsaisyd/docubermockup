@@ -140,6 +140,44 @@ export function demoRoute(path: string, init?: RequestInit): unknown {
     };
   }
 
+  if (path === "/clinics/staff" && (init?.method ?? "GET") === "GET") {
+    return [
+      { id: "demo-staff-1", phone: "9000000010", created_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString() },
+      { id: "demo-staff-2", phone: "9000000011", created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString() },
+    ];
+  }
+  if (path === "/clinics/staff/invite" && init?.method === "POST") {
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    return { id: `demo-staff-${Math.random().toString(16).slice(2)}`, phone: body.phone, created_at: new Date().toISOString() };
+  }
+  if (path.startsWith("/clinics/staff/") && init?.method === "DELETE") {
+    return { ok: true, deleted: 1 };
+  }
+
+  if (path === "/billing/clinic/payments" && (init?.method ?? "GET") === "GET") {
+    return [
+      {
+        shift_id: "demo-shift-1",
+        amount_inr: 3500,
+        status: "paid",
+        provider: "razorpay",
+        provider_order_id: "order_demo_123",
+        provider_payment_id: "pay_demo_123",
+        created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+      },
+    ];
+  }
+  if (path === "/billing/clinic/invoices" && (init?.method ?? "GET") === "GET") {
+    return demoShifts.map((s) => ({
+      shift_id: s.id,
+      status: s.status,
+      amount_inr: s.pay_amount_inr,
+      start_time: s.start_time,
+      end_time: s.end_time,
+      invoice_url: `/invoices/${s.id}`,
+    }));
+  }
+
   if (path === "/shifts" && (init?.method ?? "GET") === "GET") return demoShifts;
   if (path === "/shifts" && init?.method === "POST") {
     const b = init?.body ? JSON.parse(String(init.body)) : {};
@@ -212,6 +250,7 @@ export function demoRoute(path: string, init?: RequestInit): unknown {
 
   if (path.includes("/otp/create")) return { ok: true, expires_at: new Date(now + 5 * 60 * 1000).toISOString(), dev_otp: "654321" };
   if (path === "/payments/create-order") return { provider: "razorpay", amount_inr: 3500, provider_order_id: "order_demo_123" };
+  if (path === "/payments/confirm") return { ok: true, status: "paid", shift_id: "demo-shift-1" };
 
   return {};
 }

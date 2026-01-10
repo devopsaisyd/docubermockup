@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from app.core.security import create_access_token
 from app.models.clinic import ClinicProfile
 from app.models.doctor import DoctorProfile
-from app.models.enums import Role, Specialty, VerificationStatus, ShiftStatus
+from app.models.enums import PaymentStatus, Role, Specialty, VerificationStatus, ShiftStatus
+from app.models.finance import Payment
 from app.models.shift import Shift
 from app.models.user import User
 
@@ -66,6 +67,20 @@ def test_booking_and_checkin_otp_flow(client, db_session: Session):
     res = client.post(f"/shifts/{shift.id}/book", json={}, headers=auth_header(doctor_token))
     assert res.status_code == 200, res.text
     assignment_id = res.json()["assignment_id"]
+
+    # Payment must be captured before live shift actions
+    db_session.add(
+        Payment(
+            shift_id=shift.id,
+            clinic_user_id=clinic_user.id,
+            amount_inr=shift.pay_amount_inr,
+            status=PaymentStatus.paid,
+            provider="razorpay",
+            provider_order_id="order_test",
+            provider_payment_id="pay_test",
+        )
+    )
+    db_session.commit()
 
     # Doctor sends a location ping within geofence and active window
     ping = {"ts": now.isoformat(), "lat": 13.04181, "lng": 80.23411, "accuracy": 8.0}

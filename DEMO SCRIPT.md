@@ -1,6 +1,6 @@
 ## LocumMap Chennai (MVP) — Demo Script
 
-This script walks through a full **clinic → doctor → live tracking → OTP check-in/out → payment/payout → invoice** demo.
+This script walks through a full **clinic → doctor → negotiation → pay (UPI) → live tracking → OTP check-in/out → payout → invoices** demo.
 
 ### 0) Start services (local)
 
@@ -58,6 +58,11 @@ You should now see:
 - status: `BOOKED`
 - a live map with Clinic marker `C`
 
+### 3.5) Broadcast bidding + negotiation (advanced)
+
+1. Doctor can send a **counter offer** in chat (`Offer: ₹xxxx`)
+2. Clinic can **Accept** the offer → this updates shift pay and (for posted shifts) can auto-book the offering doctor.
+
 ### 4) Doctor sign-in and accept (Doctor app)
 
 1. In Expo app:
@@ -95,8 +100,9 @@ Rules:
 
 ### 8) Payment + payout (MVP)
 
-Payment order:
-- Clinic web → **Create payment order** (creates Razorpay order or demo order)
+Payment (UPI via Razorpay Checkout):
+- Clinic web → Shift detail → **Create payment order** → Razorpay checkout (UPI/Card/Netbanking)
+- In demo mode (no keys), payment confirm is simulated.
 
 Payout:
 - For MVP, payout is admin-driven:
@@ -109,4 +115,16 @@ Payout:
 ### 9) Invoice
 
 Clinic web → **Invoice (HTML)** button → print/save as PDF.
+
+### 10) Clinic admin screens
+
+- Clinic web → `/admin`
+  - **Staff & roles**: invite/remove staff
+  - **Billing & invoices**: list payments + open invoices
+
+### 11) Doctor earnings
+
+Doctor app → **Earnings**:
+- payouts list
+- invoice list (HTML invoices printable to PDF)
 

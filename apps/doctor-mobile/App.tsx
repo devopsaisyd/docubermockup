@@ -147,12 +147,12 @@ async function stopBackgroundTracking() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<"login" | "profile" | "jobs" | "live">(() => {
+  const [screen, setScreen] = useState<"login" | "profile" | "jobs" | "live" | "earnings">(() => {
     if (!SCREENSHOT_MODE || Platform.OS !== "web") return "login";
     try {
       const q = new URLSearchParams(window.location.search);
       const s = q.get("screen");
-      if (s === "profile" || s === "jobs" || s === "live" || s === "login") return s;
+      if (s === "profile" || s === "jobs" || s === "live" || s === "login" || s === "earnings") return s;
     } catch {
       // ignore
     }
@@ -176,6 +176,7 @@ export default function App() {
   const [offerAmount, setOfferAmount] = useState("3500");
   const shiftSocketRef = useRef<any>(null);
   const lobbySocketRef = useRef<any>(null);
+  const [earnings, setEarnings] = useState<any | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -252,6 +253,27 @@ export default function App() {
             created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
           },
         ]);
+        setEarnings({
+          shifts: [
+            {
+              shift_id: "demo-shift-1",
+              status: "paid",
+              amount_inr: 4000,
+              start_time: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+              end_time: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000).toISOString(),
+              invoice_url: "/invoices/demo-shift-1",
+            },
+          ],
+          payouts: [
+            {
+              shift_id: "demo-shift-1",
+              amount_inr: 4000,
+              status: "paid",
+              paid_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+            },
+          ],
+        });
         return;
       }
       const tok = await AsyncStorage.getItem("locummap_token");
@@ -386,6 +408,18 @@ export default function App() {
     }
   }
 
+  async function loadEarnings() {
+    setLoading(true);
+    try {
+      const res = await api<any>("/billing/doctor/earnings");
+      setEarnings(res);
+      setScreen("earnings");
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
   async function acceptShift(shiftId: string) {
     setLoading(true);
     try {
@@ -658,6 +692,7 @@ export default function App() {
           <Header title="Available shifts" />
           <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
             <PrimaryButton title="Refresh" onPress={refreshJobs} />
+            <PrimaryButton title="Earnings" onPress={loadEarnings} variant="ghost" />
             <PrimaryButton
               title="Logout"
               onPress={async () => {
@@ -696,6 +731,41 @@ export default function App() {
             </Card>
           ))}
           {jobs.length === 0 ? <Text style={styles.hint}>No jobs right now.</Text> : null}
+        </ScrollView>
+      ) : null}
+
+      {screen === "earnings" ? (
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <Header title="Earnings" />
+          <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+            <PrimaryButton title="Back" onPress={() => setScreen("jobs")} variant="ghost" />
+            <PrimaryButton title="Refresh" onPress={loadEarnings} />
+          </View>
+          <Card>
+            <Text style={{ fontWeight: "900" }}>Payouts</Text>
+            {(earnings?.payouts ?? []).map((p: any) => (
+              <View key={p.shift_id} style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(2,132,199,0.12)" }}>
+                <Text style={{ fontWeight: "900" }}>₹ {p.amount_inr}</Text>
+                <Text style={styles.hint}>Status: {String(p.status).toUpperCase()}</Text>
+                <Text style={styles.hint}>Paid: {p.paid_at ? new Date(p.paid_at).toLocaleString() : "-"}</Text>
+              </View>
+            ))}
+            {(earnings?.payouts ?? []).length === 0 ? <Text style={styles.hint}>No payouts yet.</Text> : null}
+          </Card>
+          <Card>
+            <Text style={{ fontWeight: "900" }}>Invoices</Text>
+            <Text style={styles.hint}>Open invoice links on web for tax docs (HTML → Print to PDF).</Text>
+            {(earnings?.shifts ?? []).map((s: any) => (
+              <View key={s.shift_id} style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(2,132,199,0.12)" }}>
+                <Text style={{ fontWeight: "900" }}>₹ {s.amount_inr}</Text>
+                <Text style={styles.hint}>Status: {String(s.status).toUpperCase()}</Text>
+                <Text style={styles.hint}>
+                  {new Date(s.start_time).toLocaleString()} → {new Date(s.end_time).toLocaleString()}
+                </Text>
+              </View>
+            ))}
+            {(earnings?.shifts ?? []).length === 0 ? <Text style={styles.hint}>No invoices yet.</Text> : null}
+          </Card>
         </ScrollView>
       ) : null}
 

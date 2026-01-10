@@ -3,18 +3,21 @@ from __future__ import annotations
 import json
 import uuid
 
+import hashlib
+import hmac
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.deps import require_role
+from app.core.deps import get_clinic_owner_id, require_role
 from app.db.session import get_db
 from app.models.enums import PaymentStatus, Role, ShiftStatus
 from app.models.finance import Payment
 from app.models.shift import Shift
 from app.models.user import User
-from app.schemas.payments import CreateOrderIn, CreateOrderOut
+from app.schemas.payments import ConfirmPaymentIn, ConfirmPaymentOut, CreateOrderIn, CreateOrderOut
 from app.services.audit import record_event
 from app.services.razorpay import razorpay
 
@@ -29,7 +32,8 @@ async def create_order(
     db: Session = Depends(get_db),
 ):
     shift = db.get(Shift, payload.shift_id)
-    if not shift or shift.clinic_user_id != user.id:
+    owner_id = get_clinic_owner_id(user, db)
+    if not shift or shift.clinic_user_id != owner_id:
         raise HTTPException(status_code=404, detail="Shift not found")
     if shift.status not in (ShiftStatus.posted, ShiftStatus.booked):
         raise HTTPException(status_code=409, detail="Shift not payable")
@@ -48,7 +52,7 @@ async def create_order(
     if not existing:
         existing = Payment(
             shift_id=shift.id,
-            clinic_user_id=user.id,
+            clinic_user_id=owner_id,
             amount_inr=shift.pay_amount_inr,
             status=PaymentStatus.created,
             provider="razorpay",
@@ -76,6 +80,50 @@ async def create_order(
         provider_order_id=provider_order_id,
         razorpay_key_id=settings.razorpay_key_id,
     )
+
+
+@router.post("/payments/confirm", response_model=ConfirmPaymentOut)
+def confirm_payment(
+    payload: ConfirmPaymentIn,
+    user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff)),
+    db: Session = Depends(get_db),
+):
+    p = db.scalar(select(Payment).where(Payment.provider_order_id == payload.provider_order_id))
+    if not p:
+        raise HTTPException(status_code=404, detail="Payment order not found")
+    owner_id = get_clinic_owner_id(user, db)
+    if p.clinic_user_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    # Verify Razorpay signature (order_id|payment_id) if secret is configured.
+    if settings.razorpay_key_secret and payload.provider_signature:
+        msg = f"{payload.provider_order_id}|{payload.provider_payment_id}".encode("utf-8")
+        expected = hmac.new(
+            settings.razorpay_key_secret.encode("utf-8"),
+            msg,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, payload.provider_signature):
+            raise HTTPException(status_code=401, detail="Invalid payment signature")
+
+    p.status = PaymentStatus.paid
+    p.provider_payment_id = payload.provider_payment_id
+    db.commit()
+
+    shift = db.get(Shift, p.shift_id)
+    if shift:
+        record_event(
+            db,
+            shift_id=shift.id,
+            assignment_id=shift.assignment.id if shift.assignment else None,
+            actor_user_id=user.id,
+            event_type="payment_confirmed",
+            payload={"provider_order_id": payload.provider_order_id, "provider_payment_id": payload.provider_payment_id},
+        )
+        db.commit()
+        return ConfirmPaymentOut(status=p.status.value, shift_id=shift.id)
+
+    return ConfirmPaymentOut(status=p.status.value, shift_id=p.shift_id)
 
 
 @router.post("/payments/webhook")

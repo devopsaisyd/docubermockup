@@ -47,6 +47,8 @@ class CandidateOut(BaseModel):
     reliability: dict
     eta_minutes: int | None
     distance_m: int
+    acceptance_likelihood: float
+    score: float
 
 
 class ShiftBookIn(BaseModel):

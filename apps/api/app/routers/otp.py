@@ -15,6 +15,8 @@ from app.db.session import get_db
 from app.models.audit import AuditEvent
 from app.models.clinic import ClinicProfile
 from app.models.enums import AssignmentStatus, Role, ShiftStatus
+from app.models.enums import PaymentStatus
+from app.models.finance import Payment
 from app.models.shift import LocationPing, OtpSession, Shift, ShiftAssignment
 from app.models.user import User
 from app.schemas.assignments import OtpCreateOut, OtpVerifyIn
@@ -23,6 +25,11 @@ from app.services.shift_state import ensure_transition
 
 
 router = APIRouter()
+
+def _require_payment_paid(db: Session, shift_id: uuid.UUID) -> None:
+    p = db.scalar(select(Payment).where(Payment.shift_id == shift_id))
+    if not p or p.status != PaymentStatus.paid:
+        raise HTTPException(status_code=402, detail="Payment required before check-in/out")
 
 
 @router.post("/assignments/{assignment_id}/otp/create", response_model=OtpCreateOut)
@@ -39,6 +46,7 @@ def create_otp(
     shift = db.get(Shift, a.shift_id)
     if not shift or shift.clinic_user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your assignment")
+    _require_payment_paid(db, shift.id)
 
     otp = generate_otp()
     expires_at = now_utc() + timedelta(seconds=settings.otp_ttl_seconds)
@@ -79,6 +87,7 @@ async def verify_otp(
     shift = db.get(Shift, a.shift_id)
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
+    _require_payment_paid(db, shift.id)
 
     otp_row = db.scalar(
         select(OtpSession)

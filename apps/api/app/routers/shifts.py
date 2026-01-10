@@ -165,6 +165,14 @@ async def candidates(
         if d.home_lat is None or d.home_lng is None:
             continue
         eta = await distance_matrix_eta(origin_lat=d.home_lat, origin_lng=d.home_lng, dest_lat=shift.lat, dest_lng=shift.lng)
+        # Matching intelligence (MVP+): simple likelihood/score model
+        on_time = float(d.reliability_on_time_rate)
+        rating = float(d.reliability_avg_rating) / 5.0
+        cancels = float(d.reliability_cancels_count)
+        no_show = float(d.reliability_no_show_count)
+        eta_norm = (eta.eta_minutes or 60) / 60.0
+        acceptance = max(0.05, min(0.98, 0.55 * on_time + 0.30 * rating - 0.06 * cancels - 0.12 * no_show - 0.20 * eta_norm))
+        score = max(0.0, min(1.0, acceptance + (0.15 if (eta.eta_minutes or 9999) <= 20 else 0.0)))
         out.append(
             CandidateOut(
                 doctor_user_id=d.user_id,
@@ -179,10 +187,12 @@ async def candidates(
                 },
                 eta_minutes=eta.eta_minutes,
                 distance_m=eta.distance_m,
+                acceptance_likelihood=acceptance,
+                score=score,
             )
         )
 
-    out.sort(key=lambda x: (x.eta_minutes if x.eta_minutes is not None else 10**9, -x.reliability.get("on_time_rate", 0)))
+    out.sort(key=lambda x: (-x.score, x.eta_minutes if x.eta_minutes is not None else 10**9))
     return out[:20]
 
 

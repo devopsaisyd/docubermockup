@@ -9,6 +9,9 @@ const pages = [
   { path: "/onboarding", name: "03-onboarding.png" },
   { path: "/shifts", name: "04-shifts-map.png" },
   { path: "/shifts/demo-shift-1", name: "05-shift-detail-live.png" },
+  { path: "/admin", name: "06-admin-overview.png" },
+  { path: "/admin/staff", name: "07-admin-staff.png" },
+  { path: "/admin/billing", name: "08-admin-billing.png" },
 ];
 
 const browser = await chromium.launch();
