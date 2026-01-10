@@ -1412,6 +1412,53 @@
         }
       }
     },
+    "/invoices/{shift_id}.pdf": {
+      "get": {
+        "tags": [
+          "invoices"
+        ],
+        "summary": "Invoice Pdf",
+        "description": "Simple PDF invoice for tax/accounting (server-generated).",
+        "operationId": "invoice_pdf_invoices__shift_id__pdf_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "shift_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Shift Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/billing/clinic/payments": {
       "get": {
         "tags": [
@@ -1473,6 +1520,52 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/devices/push-token": {
+      "post": {
+        "tags": [
+          "devices"
+        ],
+        "summary": "Register Push Token",
+        "operationId": "register_push_token_devices_push_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterPushTokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterPushTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -2547,6 +2640,37 @@
           "status"
         ],
         "title": "PayoutOut"
+      },
+      "RegisterPushTokenIn": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 10,
+            "title": "Token"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "default": "expo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "RegisterPushTokenIn"
+      },
+      "RegisterPushTokenOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "RegisterPushTokenOut"
       },
       "ShiftBookIn": {
         "properties": {

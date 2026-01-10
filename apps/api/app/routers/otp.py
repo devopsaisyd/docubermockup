@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.assignments import OtpCreateOut, OtpVerifyIn
 from app.services.audit import emit_timeline_update, record_event
 from app.services.shift_state import ensure_transition
+from app.services.push_notifications import notify_user
 
 
 router = APIRouter()
@@ -33,7 +34,7 @@ def _require_payment_paid(db: Session, shift_id: uuid.UUID) -> None:
 
 
 @router.post("/assignments/{assignment_id}/otp/create", response_model=OtpCreateOut)
-def create_otp(
+async def create_otp(
     assignment_id: uuid.UUID,
     type: str = Query(pattern="^(checkin|checkout)$"),
     allow_remote: bool = Query(default=False, description="Clinic override to allow OTP outside geofence"),
@@ -67,6 +68,18 @@ def create_otp(
         payload={"allow_remote": allow_remote},
     )
     db.commit()
+
+    # Notify doctor that OTP is ready (do NOT include OTP itself)
+    try:
+        await notify_user(
+            db,
+            a.doctor_user_id,
+            title="OTP ready",
+            body=f"{type.upper()} OTP is ready. Ask clinic staff.",
+            data={"assignment_id": str(a.id), "type": type},
+        )
+    except Exception:
+        pass
 
     return OtpCreateOut(expires_at=expires_at, dev_otp=otp if settings.allow_dev_otp_echo else None)
 

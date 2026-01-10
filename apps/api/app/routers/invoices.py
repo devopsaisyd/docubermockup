@@ -89,3 +89,73 @@ def invoice(
 """
     return HTMLResponse(content=html)
 
+
+@router.get("/invoices/{shift_id}.pdf")
+def invoice_pdf(
+    shift_id: uuid.UUID,
+    user: User = Depends(require_role(Role.clinic_admin, Role.clinic_staff, Role.doctor, Role.admin)),
+    db: Session = Depends(get_db),
+):
+    """
+    Simple PDF invoice for tax/accounting (server-generated).
+    """
+    from io import BytesIO
+
+    from fastapi.responses import StreamingResponse
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+
+    shift = db.get(Shift, shift_id)
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    if user.role in (Role.clinic_admin, Role.clinic_staff) and shift.clinic_user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your invoice")
+    if user.role == Role.doctor and (not shift.assignment or shift.assignment.doctor_user_id != user.id):
+        raise HTTPException(status_code=403, detail="Not your invoice")
+
+    clinic = db.get(ClinicProfile, shift.clinic_profile_id)
+    doctor_name = "-"
+    if shift.assignment:
+        doc = db.scalar(select(DoctorProfile).where(DoctorProfile.user_id == shift.assignment.doctor_user_id))
+        doctor_name = doc.full_name if doc else "-"
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    y = h - 20 * mm
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(20 * mm, y, "LocumMap Chennai — Invoice")
+    y -= 10 * mm
+
+    c.setFont("Helvetica", 10)
+    c.drawString(20 * mm, y, f"Shift ID: {shift.id}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Status: {shift.status.value.upper()}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Clinic: {clinic.name if clinic else '-'}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Doctor: {doctor_name}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Specialty: {shift.specialty.value}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Address: {shift.address}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"Start: {shift.start_time.isoformat()}")
+    y -= 6 * mm
+    c.drawString(20 * mm, y, f"End: {shift.end_time.isoformat()}")
+    y -= 10 * mm
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(20 * mm, y, f"Total: ₹ {shift.pay_amount_inr}")
+    y -= 12 * mm
+
+    c.setFont("Helvetica", 9)
+    c.drawString(20 * mm, y, "This is a system-generated invoice.")
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f"inline; filename=invoice-{shift.id}.pdf"})
+

@@ -107,7 +107,9 @@ export default function BillingPage() {
                   <div className="mt-1 text-xs text-slate-500">
                     {new Date(i.start_time).toLocaleString()} → {new Date(i.end_time).toLocaleString()}
                   </div>
-                  <div className="mt-1 text-xs font-semibold text-sky-700 dark:text-sky-300">Open invoice</div>
+                  <div className="mt-1 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                    Open invoice (HTML) · PDF available at {i.invoice_url}.pdf
+                  </div>
                 </div>
               </a>
             ))}

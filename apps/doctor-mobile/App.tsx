@@ -2,6 +2,8 @@ import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,6 +22,7 @@ import {
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const LOCATION_TASK = "locummap-location-task";
 const SCREENSHOT_MODE = process.env.EXPO_PUBLIC_SCREENSHOT_MODE === "true";
+const PING_QUEUE_KEY = "locummap_ping_queue";
 
 type Role = "doctor";
 
@@ -109,7 +112,15 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
       body: JSON.stringify(payload),
     });
   } catch {
-    // ignore
+    // Queue for later flush (offline/temporary failure)
+    try {
+      const raw = await AsyncStorage.getItem(PING_QUEUE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      arr.push({ assignmentId, payload });
+      await AsyncStorage.setItem(PING_QUEUE_KEY, JSON.stringify(arr.slice(-200)));
+    } catch {
+      // ignore
+    }
   }
 });
 
@@ -144,6 +155,68 @@ async function stopBackgroundTracking() {
   await AsyncStorage.removeItem("locummap_active_assignment_id");
   const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
   if (hasStarted) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+}
+
+async function flushPingQueue() {
+  const token = await AsyncStorage.getItem("locummap_token");
+  if (!token) return;
+  const raw = await AsyncStorage.getItem(PING_QUEUE_KEY);
+  if (!raw) return;
+  let items: any[] = [];
+  try {
+    items = JSON.parse(raw);
+  } catch {
+    await AsyncStorage.removeItem(PING_QUEUE_KEY);
+    return;
+  }
+  if (!Array.isArray(items) || items.length === 0) return;
+  const remaining: any[] = [];
+  for (const it of items) {
+    try {
+      await fetch(`${API_BASE_URL}/assignments/${it.assignmentId}/location`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(it.payload),
+      });
+    } catch {
+      remaining.push(it);
+    }
+  }
+  if (remaining.length === 0) await AsyncStorage.removeItem(PING_QUEUE_KEY);
+  else await AsyncStorage.setItem(PING_QUEUE_KEY, JSON.stringify(remaining.slice(-200)));
+}
+
+async function registerPushToken() {
+  if (SCREENSHOT_MODE) return;
+  try {
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync("default", {
+        name: "default",
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
+
+    const perms = await Notifications.getPermissionsAsync();
+    if (perms.status !== "granted") {
+      const req = await Notifications.requestPermissionsAsync();
+      if (req.status !== "granted") return;
+    }
+
+    const projectId =
+      (Constants.easConfig as any)?.projectId ||
+      (Constants.expoConfig as any)?.extra?.eas?.projectId ||
+      undefined;
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+    const jwt = await AsyncStorage.getItem("locummap_token");
+    if (!jwt) return;
+    await fetch(`${API_BASE_URL}/devices/push-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ token: token.data, platform: "expo" }),
+    });
+  } catch {
+    // ignore
+  }
 }
 
 export default function App() {
@@ -276,6 +349,7 @@ export default function App() {
         });
         return;
       }
+      await flushPingQueue();
       const tok = await AsyncStorage.getItem("locummap_token");
       if (tok) {
         await bootstrap();
@@ -295,6 +369,7 @@ export default function App() {
       setScreen("jobs");
       await refreshJobs();
       await connectLobbySocket(d.specialty);
+      await registerPushToken();
     } catch {
       setScreen("profile");
     } finally {
@@ -560,17 +635,22 @@ export default function App() {
     if (!active) return;
     const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     setCurrentLoc({ lat: loc.coords.latitude, lng: loc.coords.longitude });
-    await api(`/assignments/${active.assignmentId}/location`, {
-      method: "POST",
-      body: JSON.stringify({
-        ts: new Date(loc.timestamp).toISOString(),
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
-        speed: loc.coords.speed ?? null,
-        heading: loc.coords.heading ?? null,
-        accuracy: loc.coords.accuracy ?? null,
-      }),
-    });
+    const payload = {
+      ts: new Date(loc.timestamp).toISOString(),
+      lat: loc.coords.latitude,
+      lng: loc.coords.longitude,
+      speed: loc.coords.speed ?? null,
+      heading: loc.coords.heading ?? null,
+      accuracy: loc.coords.accuracy ?? null,
+    };
+    try {
+      await api(`/assignments/${active.assignmentId}/location`, { method: "POST", body: JSON.stringify(payload) });
+    } catch {
+      const raw = (await AsyncStorage.getItem(PING_QUEUE_KEY)) ?? "[]";
+      const arr = JSON.parse(raw);
+      arr.push({ assignmentId: active.assignmentId, payload });
+      await AsyncStorage.setItem(PING_QUEUE_KEY, JSON.stringify(arr.slice(-200)));
+    }
   }
 
   async function navigateToClinic() {

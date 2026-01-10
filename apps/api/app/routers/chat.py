@@ -18,6 +18,7 @@ from app.schemas.chat import ChatMessageOut, ChatSendIn, OfferRespondIn
 from app.services.audit import record_event
 from app.realtime.socketio import emit_shift_update
 from app.services.shift_state import now_utc
+from app.services.push_notifications import notify_user
 
 
 router = APIRouter()
@@ -106,6 +107,14 @@ async def send_message(
             },
         },
     )
+    # Notify the counterparty (best-effort)
+    try:
+        if user.role in (Role.clinic_admin, Role.clinic_staff) and shift.assignment:
+            await notify_user(db, shift.assignment.doctor_user_id, title="New message", body="Clinic sent you a message.", data={"shift_id": str(shift.id)})
+        if user.role == Role.doctor:
+            await notify_user(db, shift.clinic_user_id, title="New message", body="Doctor sent you a message.", data={"shift_id": str(shift.id)})
+    except Exception:
+        pass
     return msg
 
 
@@ -189,5 +198,17 @@ async def respond_offer(
             "offer_amount_inr": msg.offer_amount_inr,
         },
     )
+    # Notify doctor if clinic accepted/rejected offer
+    try:
+        if user.role in (Role.clinic_admin, Role.clinic_staff):
+            await notify_user(
+                db,
+                msg.sender_user_id,
+                title="Offer update",
+                body=f"Your offer was {msg.offer_status}.",
+                data={"shift_id": str(shift.id)},
+            )
+    except Exception:
+        pass
     return msg
 

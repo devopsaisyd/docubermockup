@@ -20,6 +20,7 @@ from app.services.audit import record_event
 from app.services.google_maps import distance_matrix_eta
 from app.services.shift_state import assignment_status_from_shift_status, ensure_transition, now_utc
 from app.realtime.socketio import emit_specialty_broadcast
+from app.services.push_notifications import notify_user
 
 
 router = APIRouter()
@@ -111,6 +112,23 @@ async def create_shift(
             },
         },
     )
+    # Best-effort push notifications to matching doctors (if tokens registered).
+    doctors = db.scalars(
+        select(DoctorProfile).where(
+            and_(
+                DoctorProfile.verification_status == VerificationStatus.approved,
+                DoctorProfile.specialty == shift.specialty,
+            )
+        )
+    ).all()
+    for d in doctors[:50]:
+        await notify_user(
+            db,
+            d.user_id,
+            title="New shift available",
+            body=f"{shift.specialty.value.replace('_',' ')} • ₹{shift.pay_amount_inr} • Chennai",
+            data={"shift_id": str(shift.id)},
+        )
     return _to_shift_out(db, shift)
 
 

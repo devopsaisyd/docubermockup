@@ -433,6 +433,14 @@ export default function ShiftDetailPage() {
               >
                 Invoice (HTML)
               </a>
+              <a
+                className="h-11 px-4 rounded-xl font-semibold bg-white/60 border border-black/10 hover:bg-white/80 inline-flex items-center dark:bg-white/10 dark:border-white/10 dark:hover:bg-white/15"
+                href={`${API_BASE_URL}/invoices/${shift.id}.pdf`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Invoice (PDF)
+              </a>
             </div>
 
             {devOtp ? (
